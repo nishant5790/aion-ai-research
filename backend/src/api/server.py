@@ -18,6 +18,7 @@ DEFAULT_CORS_ORIGINS = [
     "https://ai-report-gen.onrender.com",
     "http://localhost:5175",
     "https://deepinsightlabs25-tech.github.io",
+    "https://aion-ai-research.onrender.com"
 ]
 
 
