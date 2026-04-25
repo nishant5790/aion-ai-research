@@ -4,5 +4,5 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: './', // Relative paths for GitHub Pages compatibility
+  base: '/research-ai-fe/', // GitHub Pages base path matches homepage in package.json
 })
