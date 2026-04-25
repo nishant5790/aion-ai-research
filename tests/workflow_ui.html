@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Content Workflow</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --primary: #58a6ff;
+            --primary-hover: #79c0ff;
+            --text-main: #c9d1d9;
+            --text-muted: #8b949e;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(225,39%,30%,0.2) 0, transparent 50%), 
+                radial-gradient(at 100% 0%, hsla(339,49%,30%,0.2) 0, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 4rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            padding: 2rem;
+            box-sizing: border-box;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin: 0 0 0.5rem 0;
+            background: linear-gradient(to right, #79c0ff, #d2a8ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 300;
+        }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            margin-bottom: 2rem;
+        }
+
+        .glass-panel:hover {
+            box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        textarea {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 1rem;
+            color: white;
+            font-family: inherit;
+            font-size: 1rem;
+            resize: vertical;
+            min-height: 120px;
+            box-sizing: border-box;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+        }
+
+        textarea::placeholder {
+            color: #666;
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, #1f6feb 0%, #3fb950 100%);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            align-self: flex-end;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(63, 185, 80, 0.4);
+            background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+        }
+
+        .btn-submit:active {
+            transform: translateY(0);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loader {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .result-container {
+            display: none;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .result-container.active {
+            display: block;
+            opacity: 1;
+        }
+
+        .result-content {
+            white-space: pre-wrap;
+            line-height: 1.6;
+            color: #f0f6fc;
+            font-size: 1.05rem;
+            overflow-x: hidden;
+            word-wrap: break-word;
+        }
+
+        /* Markdown-like styling inside result */
+        .result-content h1, .result-content h2, .result-content h3 {
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            color: var(--primary);
+        }
+        
+        .result-content code {
+            background: rgba(255,255,255,0.1);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        
+        .result-content pre {
+            background: rgba(0,0,0,0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid var(--glass-border);
+        }
+        
+        .result-content pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .streaming-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 16px;
+            background-color: var(--primary);
+            animation: blink 1s step-end infinite;
+            vertical-align: middle;
+            margin-left: 4px;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AI Workflow Runner</h1>
+            <p class="subtitle">Stream content creation directly from your models</p>
+        </header>
+
+        <main>
+            <div class="glass-panel">
+                <form id="workflow-form" class="input-group">
+                    <textarea 
+                        id="message-input" 
+                        placeholder="e.g. 'Machine learning in 2026' or 'Write a detailed blog post about quantum computing...'"
+                        required
+                    ></textarea>
+                    <button type="submit" class="btn-submit" id="submit-btn">
+                        <span>Run Workflow</span>
+                        <div class="loader" id="loader"></div>
+                    </button>
+                </form>
+            </div>
+
+            <div class="glass-panel result-container" id="result-container">
+                <div class="result-content" id="result-content"></div><span class="streaming-indicator" id="streaming-indicator" style="display: none;"></span>
+            </div>
+        </main>
+    </div>
+
+    <!-- We use marked.js for basic markdown rendering if the stream is complete, but while streaming we will just append text. Alternatively, we can render markdown live. For simplicity and robustness, we show raw text during stream and then render markdown at the end. -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script>
+        const form = document.getElementById('workflow-form');
+        const messageInput = document.getElementById('message-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const btnText = submitBtn.querySelector('span');
+        const loader = document.getElementById('loader');
+        const resultContainer = document.getElementById('result-container');
+        const resultContent = document.getElementById('result-content');
+        const streamingIndicator = document.getElementById('streaming-indicator');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            // UI Reset
+            btnText.textContent = 'Running...';
+            submitBtn.disabled = true;
+            loader.style.display = 'block';
+            resultContainer.classList.add('active');
+            resultContent.textContent = '';
+            streamingIndicator.style.display = 'inline-block';
+            
+            try {
+                // Formulate the request directly based on the curl command
+                const formData = new URLSearchParams();
+                formData.append('message', message);
+                formData.append('stream', 'true');
+                formData.append('session_id', '');
+                formData.append('user_id', '');
+                formData.append('version', '');
+
+                const response = await fetch('http://localhost:8000/workflows/content-creation-workflow/runs', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: formData.toString()
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Setup stream reading
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let done = false;
+                let fullText = '';
+
+                while (!done) {
+                    const { value, done: readerDone } = await reader.read();
+                    done = readerDone;
+                    
+                    if (value) {
+                        const chunk = decoder.decode(value, { stream: !done });
+                        
+                        // Depending on the API's streaming format (e.g. SSE, JSONL, or raw text), 
+                        // you might need to extract the actual text from JSON objects here.
+                        // Assuming it streams raw text or chunked text for now.
+                        // If it's SSE format, we need to parse lines starting with "data: "
+                        
+                        // Quick heuristic parsing for typical SSE or JSON string:
+                        const lines = chunk.split('\n');
+                        for (let line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    // Try to parse as JSON if it sends JSON objects
+                                    const parsed = JSON.parse(line.slice(6));
+                                    // Adapt this based on your API response structure!
+                                    if (parsed.text) {
+                                        fullText += parsed.text;
+                                    } else if (parsed.content) {
+                                        fullText += parsed.content;
+                                    } else {
+                                        fullText += typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+                                    }
+                                } catch(e) {
+                                    // If not JSON, just take the raw string
+                                    fullText += line.slice(6);
+                                }
+                            } else {
+                                // If not SSE, just append raw chunk (we can't know for sure without seeing API output)
+                                // In many FastAPI StreamingResponses, it returns raw string or specific JSON per line
+                                try {
+                                    const parsed = JSON.parse(line);
+                                    if (parsed.content) fullText += parsed.content;
+                                    else if (parsed.text) fullText += parsed.text;
+                                } catch(e) {
+                                    // It's just raw text part
+                                    // Check if it's not empty and not an SSE event type
+                                    if (line.trim() && !line.startsWith('event:')) {
+                                        // fullText += line + '\n';
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fallback: If heuristic parsing didn't find anything, just append the chunk if it's text
+                        if (fullText === '' && chunk.trim()) {
+                            // fullText += chunk; 
+                            // Note: To be safe with the exact output of ag-os, we append raw if we can't parse it well.
+                            // Let's use a simpler approach that just appends raw string unless it's SSE.
+                            // Let's refine the logic:
+                        }
+                        
+                        // Better parsing approach below:
+                        let textToAppend = "";
+                        // Check if looks like SSE
+                        if (chunk.includes("data: ")) {
+                            const dataMatches = chunk.match(/data: (.*)/g);
+                            if (dataMatches) {
+                                dataMatches.forEach(m => {
+                                    let dt = m.substring(6);
+                                    try {
+                                        let j = JSON.parse(dt);
+                                        if (j.event === "RunContent" && j.content !== undefined) {
+                                            textToAppend += j.content;
+                                        } else if (j.text !== undefined) {
+                                            textToAppend += j.text;
+                                        } else if (typeof j === 'string') {
+                                            textToAppend += j;
+                                        }
+                                        // Optionally show step changes
+                                        if (j.event === "StepStarted" && j.step_name) {
+                                            textToAppend += "\n\n> **Step:** " + j.step_name + "\n\n";
+                                        }
+                                    } catch {
+                                        if (dt !== "[DONE]") textToAppend += dt;
+                                    }
+                                });
+                            }
+                        } else {
+                            // If it's pure raw chunk or JSON chunks
+                            try {
+                                // tries to parse whole chunk
+                                let j = JSON.parse(chunk);
+                                textToAppend = j.content || j.text || JSON.stringify(j);
+                            } catch {
+                                textToAppend = chunk;
+                            }
+                        }
+
+                        // Write to DOM
+                        resultContent.textContent += textToAppend;
+                        
+                        // Auto-scroll to bottom of page if needed
+                        window.scrollTo(0, document.body.scrollHeight);
+                    }
+                }
+                
+                // Final render as Markdown
+                if (window.marked && resultContent.textContent) {
+                    resultContent.innerHTML = marked.parse(resultContent.textContent);
+                }
+
+            } catch (error) {
+                console.error("Error during streaming:", error);
+                resultContent.innerHTML = `<span style="color: #ff7b72;">Error: ${error.message}. Make sure your backend allows CORS.</span>`;
+            } finally {
+                // UI Cleanup
+                btnText.textContent = 'Run Workflow';
+                submitBtn.disabled = false;
+                loader.style.display = 'none';
+                streamingIndicator.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
