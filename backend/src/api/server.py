@@ -13,6 +13,7 @@ from src.api.models import (
     TaskStatusResponse,
 )
 from src.pipeline import ResearchPipeline
+from src.db.postgres import db
 
 DEFAULT_CORS_ORIGINS = [
     "https://ai-report-gen.onrender.com",
@@ -46,6 +47,7 @@ pipeline = ResearchPipeline()
 def startup_event():
     """Ensure the vector DB collection exists on server boot."""
     pipeline.initialize()
+    db.create_tables()
 
 
 @app.get("/health", response_model=HealthResponse)

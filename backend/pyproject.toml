@@ -2,7 +2,7 @@
 name = "deep-insight-research-v2"
 version = "0.2.0"
 description = "AI Research agent using FastAPI, LangChain, and Qdrant"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.30.1",
@@ -17,6 +17,8 @@ dependencies = [
     "grpcio-tools>=1.66.2",
     "streamlit>=1.50.0",
     "deepagents>=0.5.3",
+    "psycopg2-binary>=2.9.0",
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.scripts]

@@ -4,6 +4,8 @@ from typing import Optional
 import requests
 from fastapi import Header, HTTPException, status
 
+from src.db.postgres import db
+
 TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 AUTH_DISABLED_ENV = "AUTH_DISABLED"
 GOOGLE_CLIENT_ID_ENV = "GOOGLE_CLIENT_ID"
@@ -81,4 +83,17 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> dic
         }
 
     token = _extract_bearer_token(authorization)
-    return verify_google_id_token(token)
+    user_info = verify_google_id_token(token)
+
+    # Save or update user in database
+    try:
+        db.get_or_create_user(
+            google_id=user_info["sub"],
+            email=user_info.get("email"),
+            name=user_info.get("name")
+        )
+    except Exception as e:
+        # Log the error but don't fail authentication
+        print(f"Failed to save user to database: {e}")
+
+    return user_info
