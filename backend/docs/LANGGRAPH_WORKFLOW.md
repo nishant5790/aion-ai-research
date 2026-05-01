@@ -46,9 +46,10 @@ flowchart TD
     AGG --> WRITER
     WRITER --> VALIDATOR
 
-    VALIDATOR -->|"VALID / FORCED_FINISH"| CLEANUP
+    VALIDATOR -->|"VALID / FORCED_FINISH"| RF["🖼️ Report Finalizer<br/><i>Generates charts/images</i>"]
     VALIDATOR -->|"INVALID_REFS<br/>(rewrite loop, max 2 iterations)"| WRITER
 
+    RF --> CLEANUP
     CLEANUP --> FINISH
 ```
 
@@ -95,6 +96,7 @@ sequenceDiagram
     participant AG as Aggregator
     participant WR as Writer
     participant VA as Validator
+    participant RF as Report Finalizer
     participant CU as Cleanup
     participant DB as Qdrant DB
 
@@ -127,7 +129,9 @@ sequenceDiagram
         VA->>VA: HEAD/GET each URL → reachability
         VA->>VA: LLM relevance scoring per reference
         alt All references valid
-            VA->>CU: final_report
+            VA->>RF: validated report + aggregated data
+            RF->>RF: generate charts, render images, embed into report
+            RF->>CU: final_report
         else Broken / irrelevant refs found
             VA->>WR: invalid_references[] → rewrite
             WR->>VA: revised draft_report
@@ -159,6 +163,8 @@ classDiagram
         +aggregated : dict
         +draft_report : str
         +final_report : str
+        +chart_specs : list
+        +report_images : list~dict~
         +validation_feedback : str
         +invalid_references : list~str~
         +rewrite_iterations : int
@@ -176,7 +182,11 @@ classDiagram
 | `aggregated` | Aggregator | Writer, Validator |
 | `draft_report` | Writer | Validator |
 | `final_report` | Validator / Cleanup | API response |
+| `chart_specs` | Report Finalizer | Report Finalizer / Cleanup |
+| `report_images` | Report Finalizer | Cleanup / persisted report payload |
 | `invalid_references`, `rewrite_iterations` | Validator | Writer (rewrite loop) |
+
+> Note: The new `Report Finalizer` node enriches validated drafts with auto-generated charts and embedded image assets before cleanup.
 
 ---
 
