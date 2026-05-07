@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -27,6 +29,8 @@ from .chart_generator import generate_charts_for_report
 from .state import WorkflowState
 from .sub_agents import build_role_runners
 from .tools import extract_urls, validate_urls
+
+logger = logging.getLogger(__name__)
 
 # Map of role -> sub-agent system prompt.
 ROLE_PROMPTS: dict[str, str] = {
@@ -140,6 +144,7 @@ def create_node_classifier(llm, db):
     """Classify the user query into a research mode."""
 
     def node_classifier(state: WorkflowState):
+        t0 = time.time()
         prompt = CLASSIFIER_PROMPT.format(query=state["query"])
         response = llm.invoke(prompt)
         parsed = _safe_json_load(getattr(response, "content", "") or "")
@@ -153,6 +158,7 @@ def create_node_classifier(llm, db):
             "classification_rationale": parsed.get("rationale", ""),
         }
         _persist(db, state.get("task_id", ""), "classify", out)
+        logger.info(f"[classifier] type={qtype} | {time.time() - t0:.1f}s")
         return out
 
     return node_classifier
@@ -162,6 +168,7 @@ def create_node_task_generator(llm, db):
     """Decompose the query into role-tagged sub-tasks."""
 
     def node_task_generator(state: WorkflowState):
+        t0 = time.time()
         qtype = state.get("query_type", "summary")
         roles = ROLES_BY_TYPE[qtype]
         prompt = TASK_GENERATOR_PROMPT.format(
@@ -211,6 +218,7 @@ def create_node_task_generator(llm, db):
         _persist(db, state.get("task_id", ""), "task_generation",
                  {"subtasks": subtasks})
 
+        logger.info(f"[task_generator] {len(subtasks)} subtasks for {len(roles)} roles | {time.time() - t0:.1f}s")
         return {"subtasks": subtasks, "worker_payloads": payloads}
 
     return node_task_generator
@@ -252,6 +260,7 @@ def create_node_aggregator(llm, db):
     """Consolidate sub-agent outputs into a structured aggregated object."""
 
     def node_aggregator(state: WorkflowState):
+        t0 = time.time()
         outputs = state.get("worker_outputs", [])
         rendered = "\n\n".join(
             f"### {o.get('role', '?')} :: {o.get('subtask_id', '?')}\n"
@@ -280,6 +289,7 @@ def create_node_aggregator(llm, db):
             }
 
         _persist(db, state.get("task_id", ""), "aggregation", parsed)
+        logger.info(f"[aggregator] {len(outputs)} outputs → {len(parsed.get('sections', []))} sections | {time.time() - t0:.1f}s")
         return {"aggregated": parsed}
 
     return node_aggregator
@@ -289,6 +299,7 @@ def create_node_writer(llm, db):
     """Produce the final markdown report from the aggregated structure."""
 
     def node_writer(state: WorkflowState):
+        t0 = time.time()
         aggregated = state.get("aggregated", {})
         invalid_refs = state.get("invalid_references", [])
         rewrite_note = ""
@@ -309,6 +320,7 @@ def create_node_writer(llm, db):
         draft = _sanitize_report(draft)
 
         _persist(db, state.get("task_id", ""), "draft", draft)
+        logger.info(f"[writer] {len(draft)} chars (rewrite #{state.get('rewrite_iterations', 0)}) | {time.time() - t0:.1f}s")
         # Reset invalid refs after applying them in a rewrite pass.
         return {"draft_report": draft, "invalid_references": []}
 
@@ -377,6 +389,7 @@ def create_node_validator(llm, db):
     """
 
     def node_validator(state: WorkflowState):
+        t0 = time.time()
         draft = state.get("draft_report", "")
         aggregated = state.get("aggregated", {}) or {}
         query = state.get("query", "")
@@ -397,6 +410,7 @@ def create_node_validator(llm, db):
 
         if not references:
             _persist(db, task_id, "validation", {"status": "VALID", "checked": 0})
+            logger.info(f"[validator] VALID (no refs) | {time.time() - t0:.1f}s")
             return {
                 "final_report": draft,
                 "validation_feedback": "VALID (no references)",
@@ -450,6 +464,7 @@ def create_node_validator(llm, db):
                 invalid.append(u)
 
         # ---- Decision -----------------------------------------------------------
+        elapsed = time.time() - t0
         if not invalid:
             _persist(db, task_id, "validation", {
                 "status": "VALID",
@@ -457,6 +472,7 @@ def create_node_validator(llm, db):
                 "verdicts": verdict_log,
                 "llm_error": llm_error,
             })
+            logger.info(f"[validator] VALID — checked {len(references)} refs, {len(broken)} broken | {elapsed:.1f}s")
             return {
                 "final_report": draft,
                 "validation_feedback": "VALID" + (
@@ -475,6 +491,7 @@ def create_node_validator(llm, db):
                 "irrelevant": irrelevant,
                 "verdicts": verdict_log,
             })
+            logger.info(f"[validator] FORCED_FINISH after {iterations} rewrites — {len(broken)} broken, {len(irrelevant)} irrelevant | {elapsed:.1f}s")
             return {
                 "final_report": cleaned,
                 "validation_feedback": f"FORCED_FINISH after {iterations} rewrites",
@@ -487,6 +504,7 @@ def create_node_validator(llm, db):
             "irrelevant": irrelevant,
             "verdicts": verdict_log,
         })
+        logger.info(f"[validator] INVALID — {len(broken)} broken, {len(irrelevant)} irrelevant → rewrite #{iterations + 1} | {elapsed:.1f}s")
         return {
             "validation_feedback": (
                 f"INVALID_REFS: {len(broken)} broken, {len(irrelevant)} irrelevant"
@@ -505,53 +523,79 @@ def create_validation_route():
 
 
 def create_node_report_finalizer(llm, db):
-    """Enrich the validated report with auto-generated charts, graphs and images.
+    """Enrich the validated report with auto-generated visualizations (charts, diagrams, formulas).
 
     This node:
     1. Sends the final report + aggregated data to the LLM to identify
-       data points suitable for visualisation.
-    2. Renders charts via matplotlib into base64 PNG images.
+       data points suitable for visualisation (charts, flows, formulas, diagrams).
+    2. Renders visualizations via matplotlib into base64 PNG images.
     3. Embeds them as inline ``![caption](data:image/png;…)`` in the report.
+
+    Supported visualization types:
+    - Bar/Line/Area charts: for numerical data and trends
+    - Flowcharts: for process flows and workflows
+    - Architecture diagrams: for system comparisons
+    - Heatmaps: for correlation and intensity data
+    - Formulas: for mathematical relationships (LaTeX)
+    - Matrix comparisons: for capability grids
+    - Tables and stat cards: for key highlights
     """
 
     def node_report_finalizer(state: WorkflowState):
+        t0 = time.time()
         report = state.get("final_report") or state.get("draft_report") or ""
         aggregated = state.get("aggregated", {})
+        task_id = state.get("task_id", "")
 
         if not report:
+            _persist(db, task_id, "report_finalizer", {"status": "NO_REPORT"})
             return {}
 
         # Ask the LLM to produce chart specifications and an enhanced report
         # with {{CHART:<index>}} placement markers.
         prompt = REPORT_FINALIZER_PROMPT.format(
-            report=report,
+            report=report[:8000],  # Truncate very long reports
             aggregated=json.dumps(aggregated, indent=2, default=str)[:12000],
         )
         try:
             response = llm.invoke(
-                [SystemMessage(content="You are a data-visualisation specialist. Return STRICT JSON only."),
+                [SystemMessage(content="You are a data-visualisation specialist. Return STRICT JSON only. Generate diverse, relevant visualizations: bar charts, line charts, flowcharts, architecture diagrams, formulas, heatmaps. Exclude metadata charts."),
                  HumanMessage(content=prompt)]
             )
             parsed = _safe_json_load(getattr(response, "content", "") or "")
-        except Exception:
+        except Exception as e:
             # If the LLM call fails, pass through the report unchanged.
-            _persist(db, state.get("task_id", ""), "report_finalizer",
-                     {"status": "LLM_ERROR"})
-            return {}
+            _persist(db, task_id, "report_finalizer",
+                     {"status": "LLM_ERROR", "error": str(e)})
+            return {
+                "final_report": report,
+                "chart_specs": [],
+                "report_images": [],
+            }
 
         chart_specs = parsed.get("chart_specs", []) if isinstance(parsed, dict) else []
         enhanced_report = parsed.get("enhanced_report", report) if isinstance(parsed, dict) else report
 
-        # Render chart images
+        # Validate chart specs before rendering
+        valid_charts = []
+        for i, spec in enumerate(chart_specs):
+            if not isinstance(spec, dict) or not spec.get("chart_type"):
+                continue  # Skip invalid specs
+            valid_charts.append(spec)
+
+        # Render chart images with better error handling
         rendered_images: list[dict[str, str]] = []
-        if chart_specs:
-            rendered_images = generate_charts_for_report(chart_specs)
+        charts_failed = 0
+        if valid_charts:
+            rendered_images = generate_charts_for_report(valid_charts)
+            charts_failed = len(valid_charts) - len(rendered_images)
 
         # Replace {{CHART:<index>}} markers with embedded images
         final_visual_report = enhanced_report
         for i, img in enumerate(rendered_images):
             marker = f"{{{{CHART:{i}}}}}"
-            md_image = f"\n\n![{img['caption']}]({img['data_uri']})\n\n"
+            caption = img.get('caption', f'Visualization {i+1}')
+            md_image = f"\n\n![{caption}]({img['data_uri']})\n\n"
             final_visual_report = final_visual_report.replace(marker, md_image)
 
         # Clean up any unreplaced markers (if chart rendering failed for some)
@@ -559,14 +603,20 @@ def create_node_report_finalizer(llm, db):
         # Collapse excessive blank lines
         final_visual_report = re.sub(r"\n{3,}", "\n\n", final_visual_report).strip()
 
-        _persist(db, state.get("task_id", ""), "report_finalizer", {
-            "charts_requested": len(chart_specs),
+        # Persist visualization metrics
+        _persist(db, task_id, "report_finalizer", {
+            "status": "SUCCESS",
+            "charts_requested": len(valid_charts),
             "charts_rendered": len(rendered_images),
+            "charts_failed": charts_failed,
+            "chart_types": list(set(s.get("chart_type", "unknown") for s in valid_charts)),
         })
+
+        logger.info(f"[report_finalizer] {len(chart_specs)} charts requested, {len(rendered_images)} rendered, {len(final_visual_report)} chars | {time.time() - t0:.1f}s")
 
         return {
             "final_report": final_visual_report,
-            "chart_specs": chart_specs,
+            "chart_specs": valid_charts,
             "report_images": rendered_images,
         }
 

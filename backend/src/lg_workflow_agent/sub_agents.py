@@ -8,6 +8,8 @@ that only invokes the pre-built agent on each run — no per-call construction.
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Callable
 
 from langchain.agents import create_agent
@@ -108,15 +110,18 @@ def build_sub_agents(llm, tools: list | None = None) -> dict[str, Any]:
 
 
 def _make_runner(role: str, agent: Any) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    """Build a lightweight runner that invokes a *pre-built* agent."""
+    """Build a lightweight async runner that invokes a *pre-built* agent."""
 
-    def runner(payload: dict[str, Any]) -> dict[str, Any]:
+    _logger = logging.getLogger(__name__)
+
+    async def runner(payload: dict[str, Any]) -> dict[str, Any]:
+        t0 = time.time()
         user_msg = (
             f"Query: {payload.get('query', '')}\n"
             f"Sub-task: {payload.get('task', '')}"
         )
         try:
-            response = agent.invoke({"messages": [{"role": "user", "content": user_msg}]})
+            response = await agent.ainvoke({"messages": [{"role": "user", "content": user_msg}]})
             last = response["messages"][-1].content
             if isinstance(last, list):
                 # Gemini-style multi-part content.
@@ -128,6 +133,8 @@ def _make_runner(role: str, agent: Any) -> Callable[[dict[str, Any]], dict[str, 
                 text = last or ""
         except Exception as exc:
             text = f"Sub-agent {role} failed: {exc}"
+
+        _logger.info(f"[sub_agent:{role}] {len(text)} chars | {time.time() - t0:.1f}s")
 
         return {
             "worker_outputs": [
