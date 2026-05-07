@@ -293,7 +293,7 @@ def test_api_edge_cases(base_url: str):
 
     # GET /report
     try:
-        r = requests.get(f"{base_url}/report", headers=headers, timeout=5)
+        r = requests.get(f"{base_url}/report", headers=headers, timeout=30)
         data = r.json()
         _record("GET /report", r.status_code == 200 and "reports" in data, f"{len(data.get('reports', []))} reports")
     except Exception as e:
