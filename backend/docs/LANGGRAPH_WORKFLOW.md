@@ -142,7 +142,7 @@ sequenceDiagram
         end
     end
 
-    CU->>DB: save_report(query, final_report)
+    CU->>DB: save_report(query, final_report, paper_latex)
     CU->>DB: cleanup_task_data(task_id)
     CU-->>U: final_report (+ pdf_base64 for deep_research)
 ```
@@ -183,10 +183,10 @@ classDiagram
 | Field | Set By | Consumed By |
 |---|---|---|
 | `query`, `task_id`, `messages` | Initial input | All nodes |
-| `query_type`, `classification_rationale` | Classifier | Task Generator, Aggregator, Validator |
+| `query_type`, `classification_rationale` | Classifier | Task Generator, Aggregator, Validator, Paper Writer |
 | `subtasks`, `worker_payloads` | Task Generator | Assign Workers (fan-out) |
 | `worker_outputs` | Sub-agents (additive) | Aggregator |
-| `aggregated` | Aggregator | Writer, Validator |
+| `aggregated` | Aggregator | Writer, Validator, Paper Writer |
 | `draft_report` | Writer | Validator |
 | `final_report` | Validator / Report Finalizer | Paper Writer, Cleanup, API response |
 | `chart_specs` | Report Finalizer | Report Finalizer / Cleanup |
@@ -386,7 +386,7 @@ src/lg_workflow_agent/
 
 ```mermaid
 flowchart TD
-    CLIENT["Client / Streamlit UI"]
+    CLIENT["Client / Frontend UI"]
     API["FastAPI Server<br/>(src/api/server.py)"]
     PIPE["ResearchPipeline<br/>(src/pipeline/orchestrator.py)"]
     WFA["WorkflowAgent<br/>(src/lg_workflow_agent/agent.py)"]
@@ -399,9 +399,10 @@ flowchart TD
     PIPE -->|"cache miss → astream()"| WFA
     WFA --> GRAPH
     GRAPH -->|"intermediate persist"| DB
-    GRAPH -->|"final save_report()"| DB
+    GRAPH -->|"save_report(query, report, paper_latex)"| DB
     PIPE -->|"steps[] polling"| API
     API -->|"GET /status"| CLIENT
+    API -->|"GET /paper/{task_id}<br/>→ PDF download"| CLIENT
 
     style GRAPH fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
     style WFA fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
@@ -411,7 +412,61 @@ The `WorkflowAgent` is the sole research runtime exposed to the pipeline. It com
 
 ---
 
-## 10. Key Design Decisions
+## 10. Paper Writer — LaTeX & PDF Pipeline
+
+The **Paper Writer** node converts completed research reports into publishable academic papers (PDF). It only activates for `deep_research` queries.
+
+```mermaid
+flowchart TD
+    INPUT["final_report + aggregated data"]
+    
+    GEN["1. Generate LaTeX<br/><i>LLM → IEEE-style paper<br/>(article class)</i>"]
+    CLEAN["2. Clean LaTeX<br/><i>Fix texttt quotes, braces,<br/>strip figures, escape chars</i>"]
+    COMPILE["3. Compile → PDF<br/><i>PyTinyTeX (pdflatex)</i>"]
+    
+    COMPILE -->|"Success"| DONE["✅ Return PDF + LaTeX"]
+    COMPILE -->|"Errors"| FIX["4. Feed errors to LLM<br/><i>LATEX_FIX_PROMPT</i>"]
+    FIX --> CLEAN2["Clean fixed LaTeX"]
+    CLEAN2 --> COMPILE2["Retry compile"]
+    COMPILE2 -->|"Success"| DONE
+    COMPILE2 -->|"Still fails (max 2 retries)"| FALLBACK["⚠️ Return LaTeX only<br/>(no PDF)"]
+    
+    INPUT --> GEN --> CLEAN --> COMPILE
+
+    style DONE fill:#e8f5e9,stroke:#388e3c
+    style FALLBACK fill:#fff3e0,stroke:#f57c00
+```
+
+### Key Components
+
+| Component | File | Role |
+|---|---|---|
+| `RESEARCH_PAPER_PROMPT` | `prompts.py` | Instructs LLM to generate compilable LaTeX |
+| `LATEX_FIX_PROMPT` | `prompts.py` | Feeds compilation errors back to LLM for targeted fixes |
+| `clean_latex()` | `paper_formatter.py` | Regex post-processing of common LLM mistakes |
+| `compile_latex_to_pdf()` | `paper_formatter.py` | PyTinyTeX compilation + error extraction |
+| `validate_latex()` | `paper_formatter.py` | Static structural validation (braces, envs, citations) |
+| `extract_paper_metadata()` | `paper_formatter.py` | Extracts title, abstract, sections from LaTeX |
+
+### Storage & Access
+
+- **LaTeX source** → stored in Qdrant alongside the report (`payload.paper_latex`)
+- **PDF (base64)** → stored in the in-memory task dict, served via `GET /paper/{task_id}`
+- **Cache hits** → if a similar query was previously processed, both report and paper are returned immediately
+
+### API Endpoint
+
+```
+GET /paper/{task_id}
+```
+
+- If PDF compiled successfully → returns PDF as a downloadable `application/pdf` response
+- If PDF compilation failed → returns JSON with LaTeX source and error details
+- If query wasn't `deep_research` → returns 404
+
+---
+
+## 11. Key Design Decisions
 
 | Decision | Rationale |
 |---|---|
