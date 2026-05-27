@@ -49,8 +49,8 @@ def create_node_report_finalizer(llm, db):
         # Ask the LLM to produce chart specifications and an enhanced report
         # with {{CHART:<index>}} placement markers.
         prompt = REPORT_FINALIZER_PROMPT.format(
-            report=report[:8000],  # Truncate very long reports
-            aggregated=json.dumps(aggregated, indent=2, default=str)[:12000],
+            report=report,
+            aggregated=json.dumps(aggregated, indent=2, default=str),
         )
         try:
             response = llm.invoke(
