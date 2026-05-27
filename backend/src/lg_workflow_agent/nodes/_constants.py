@@ -29,4 +29,6 @@ ROLES_BY_TYPE: dict[str, list[str]] = {
     "summary": ["web_research", "latest_news_collection"],
 }
 
-MAX_REWRITES = 2
+# Validator runs exactly once: with MAX_REWRITES = 0 the validator either
+# accepts the draft or strips invalid links and finishes (no rewrite loop).
+MAX_REWRITES = 0
